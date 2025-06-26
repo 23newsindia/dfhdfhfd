@@ -1,0 +1,128 @@
+.bot-dashboard-stats {
+    display: flex;
+    gap: 20px;
+    margin: 20px 0;
+    flex-wrap: wrap;
+}
+
+.bot-stat-card {
+    background: #fff;
+    border: 1px solid #ccd0d4;
+    border-radius: 4px;
+    padding: 20px;
+    min-width: 200px;
+    text-align: center;
+    box-shadow: 0 1px 1px rgba(0,0,0,.04);
+}
+
+.bot-stat-card h3 {
+    margin: 0 0 10px 0;
+    color: #23282d;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.stat-number {
+    font-size: 32px;
+    font-weight: bold;
+    color: #0073aa;
+}
+
+.bot-dashboard-content {
+    margin-top: 30px;
+}
+
+.bot-dashboard-section {
+    background: #fff;
+    border: 1px solid #ccd0d4;
+    border-radius: 4px;
+    margin-bottom: 20px;
+    box-shadow: 0 1px 1px rgba(0,0,0,.04);
+}
+
+.bot-dashboard-section h2 {
+    margin: 0;
+    padding: 15px 20px;
+    border-bottom: 1px solid #ccd0d4;
+    background: #f9f9f9;
+    font-size: 16px;
+}
+
+.bot-table-container {
+    padding: 20px;
+}
+
+.bot-user-agent {
+    font-size: 12px;
+    color: #666;
+    font-style: italic;
+    margin-top: 5px;
+}
+
+.status-badge {
+    padding: 4px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+.status-badge.blocked {
+    background: #dc3232;
+    color: white;
+}
+
+.status-badge.monitoring {
+    background: #ffb900;
+    color: white;
+}
+
+.blocked-row {
+    background-color: #ffeaea !important;
+}
+
+.warning-row {
+    background-color: #fff8e1 !important;
+}
+
+.top-blocked-list {
+    list-style: none;
+    padding: 20px;
+    margin: 0;
+}
+
+.top-blocked-list li {
+    padding: 8px 0;
+    border-bottom: 1px solid #eee;
+}
+
+.top-blocked-list li:last-child {
+    border-bottom: none;
+}
+
+.unblock-bot {
+    background: #00a32a;
+    border-color: #00a32a;
+    color: white;
+}
+
+.unblock-bot:hover {
+    background: #008a20;
+    border-color: #008a20;
+}
+
+.unblock-bot:disabled {
+    background: #ccc;
+    border-color: #ccc;
+    cursor: not-allowed;
+}
+
+@media (max-width: 768px) {
+    .bot-dashboard-stats {
+        flex-direction: column;
+    }
+    
+    .bot-stat-card {
+        min-width: auto;
+    }
+}
