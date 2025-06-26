@@ -1,5 +1,5 @@
 jQuery(document).ready(function($) {
-    // Load dashboard stats
+    // Load dashboard stats immediately
     loadBotStats();
     
     // Auto-refresh every 30 seconds
@@ -30,13 +30,16 @@ jQuery(document).ready(function($) {
                         $(this).remove();
                     });
                     showNotice('IP unblocked successfully', 'success');
+                    // Reload stats after unblocking
+                    loadBotStats();
                 } else {
-                    showNotice('Failed to unblock IP: ' + response.data, 'error');
+                    showNotice('Failed to unblock IP: ' + (response.data || 'Unknown error'), 'error');
                     button.prop('disabled', false).text('Unblock');
                 }
             },
-            error: function() {
-                showNotice('Error occurred while unblocking IP', 'error');
+            error: function(xhr, status, error) {
+                console.error('AJAX Error:', status, error);
+                showNotice('Error occurred while unblocking IP: ' + error, 'error');
                 button.prop('disabled', false).text('Unblock');
             }
         });
@@ -53,9 +56,11 @@ jQuery(document).ready(function($) {
             success: function(response) {
                 if (response.success) {
                     var data = response.data;
-                    $('#total-blocked').text(data.total_blocked);
-                    $('#today-blocked').text(data.today_blocked);
-                    $('#week-blocked').text(data.week_blocked);
+                    
+                    // Update stats with fallback values
+                    $('#total-blocked').text(data.total_blocked || 0);
+                    $('#today-blocked').text(data.today_blocked || 0);
+                    $('#week-blocked').text(data.week_blocked || 0);
                     
                     // Update top blocked IPs
                     var topBlockedHtml = '<ul class="top-blocked-list">';
@@ -68,10 +73,22 @@ jQuery(document).ready(function($) {
                     }
                     topBlockedHtml += '</ul>';
                     $('#top-blocked-ips').html(topBlockedHtml);
+                } else {
+                    console.error('Failed to load bot stats:', response.data);
+                    // Set default values on error
+                    $('#total-blocked').text('0');
+                    $('#today-blocked').text('0');
+                    $('#week-blocked').text('0');
+                    $('#top-blocked-ips').html('<ul class="top-blocked-list"><li>Error loading data</li></ul>');
                 }
             },
-            error: function() {
-                console.log('Failed to load bot stats');
+            error: function(xhr, status, error) {
+                console.error('AJAX Error loading stats:', status, error);
+                // Set default values on error
+                $('#total-blocked').text('Error');
+                $('#today-blocked').text('Error');
+                $('#week-blocked').text('Error');
+                $('#top-blocked-ips').html('<ul class="top-blocked-list"><li>Error loading data</li></ul>');
             }
         });
     }

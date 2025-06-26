@@ -70,14 +70,14 @@ class SecuritySettings {
             'bot_skip_logged_users' => get_option('security_bot_skip_logged_users', true),
             'bot_max_requests_per_minute' => get_option('security_bot_max_requests_per_minute', 30),
             'bot_block_threshold' => get_option('security_bot_block_threshold', 5),
-            'bot_block_message' => get_option('security_bot_block_message', 'Access Denied: Automated requests not allowed.'),
+            'bot_block_message' => get_option('security_bot_block_message', 'Access Denied - Bad Bot Detected'),
             'bot_log_retention_days' => get_option('security_bot_log_retention_days', 30),
             'bot_block_status' => get_option('security_bot_block_status', 403),
             'bot_custom_message' => get_option('security_bot_custom_message', ''),
             'bot_email_alerts' => get_option('security_bot_email_alerts', false),
             'bot_alert_email' => get_option('security_bot_alert_email', get_option('admin_email')),
             'bot_whitelist_ips' => get_option('security_bot_whitelist_ips', ''),
-            'bot_whitelist_agents' => get_option('security_bot_whitelist_agents', ''),
+            'bot_whitelist_agents' => get_option('security_bot_whitelist_agents', $this->get_default_whitelist_bots()),
             // Bot blocking options
             'enable_bot_blocking' => get_option('security_enable_bot_blocking', true)
         );
@@ -562,6 +562,36 @@ class SecuritySettings {
         });
         </script>
         <?php
+    }
+
+    private function get_default_whitelist_bots() {
+        return 'googlebot
+bingbot
+slurp
+duckduckbot
+baiduspider
+yandexbot
+facebookexternalhit
+twitterbot
+linkedinbot
+pinterestbot
+applebot
+ia_archiver
+msnbot
+ahrefsbot
+semrushbot
+dotbot
+rogerbot
+uptimerobot
+pingdom
+gtmetrix
+pagespeed
+lighthouse
+chrome-lighthouse
+wordpress
+wp-rocket
+jetpack
+wordfence';
     }
 
     private function save_settings() {

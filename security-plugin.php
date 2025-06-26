@@ -2,7 +2,7 @@
 /*
 Plugin Name: Enhanced Security Plugin
 Description: Comprehensive security plugin with URL exclusion, blocking, SEO features, anti-spam protection, and bot protection
-Version: 2.3
+Version: 2.4
 Author: Your Name
 */
 
@@ -48,6 +48,22 @@ class CustomSecurityPlugin {
         add_action('waf_cleanup_logs', array($this, 'cleanup_waf_logs'));
         add_action('bot_blackhole_cleanup', array($this, 'cleanup_bot_logs'));
         add_action('bot_blocker_cleanup', array($this, 'cleanup_bot_logs'));
+        
+        // Add admin notice for debugging
+        add_action('admin_notices', array($this, 'debug_notice'));
+    }
+
+    public function debug_notice() {
+        if (current_user_can('manage_options') && isset($_GET['page']) && $_GET['page'] === 'security-bot-dashboard') {
+            global $wpdb;
+            $table_name = $wpdb->prefix . 'security_blocked_bots';
+            $table_exists = $wpdb->get_var("SHOW TABLES LIKE '$table_name'") === $table_name;
+            
+            if (!$table_exists) {
+                echo '<div class="notice notice-warning"><p>Bot protection table does not exist. Attempting to create...</p></div>';
+                $this->bot_blackhole = new BotBlackhole();
+            }
+        }
     }
 
     public function activate_plugin() {
@@ -70,13 +86,15 @@ class CustomSecurityPlugin {
             'security_bot_skip_logged_users' => true,
             'security_bot_max_requests_per_minute' => 30,
             'security_bot_block_threshold' => 5,
-            'security_bot_block_message' => 'Access Denied: Automated requests not allowed.',
+            'security_bot_block_message' => 'Access Denied - Bad Bot Detected',
             'security_bot_log_retention_days' => 30,
             'security_bot_block_status' => 403,
             'security_bot_email_alerts' => false,
             'security_bot_alert_email' => get_option('admin_email'),
             'security_protect_admin' => false,
-            'security_protect_login' => false
+            'security_protect_login' => false,
+            'security_bot_whitelist_ips' => '',
+            'security_bot_whitelist_agents' => $this->get_default_whitelist_bots()
         );
 
         foreach ($default_options as $option => $value) {
@@ -85,16 +103,46 @@ class CustomSecurityPlugin {
             }
         }
         
-        // Create bot protection tables
-        if (get_option('security_enable_bot_protection', true)) {
-            $bot_blackhole = new BotBlackhole();
-            // Table creation is handled in the constructor
-        }
+        // Force create bot protection tables
+        $bot_blackhole = new BotBlackhole();
         
         if (get_option('security_enable_bot_blocking', true)) {
             $bot_blocker = new BotBlocker();
             $bot_blocker->create_table();
         }
+        
+        // Flush rewrite rules
+        flush_rewrite_rules();
+    }
+
+    private function get_default_whitelist_bots() {
+        return 'googlebot
+bingbot
+slurp
+duckduckbot
+baiduspider
+yandexbot
+facebookexternalhit
+twitterbot
+linkedinbot
+pinterestbot
+applebot
+ia_archiver
+msnbot
+ahrefsbot
+semrushbot
+dotbot
+rogerbot
+uptimerobot
+pingdom
+gtmetrix
+pagespeed
+lighthouse
+chrome-lighthouse
+wordpress
+wp-rocket
+jetpack
+wordfence';
     }
 
     public function init_components() {

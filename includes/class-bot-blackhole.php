@@ -23,6 +23,9 @@ class BotBlackhole {
             self::$is_admin = is_admin();
         }
         
+        // Always ensure table exists
+        $this->ensure_table_exists();
+        
         // Only initialize if bot protection is enabled
         if ($this->get_option('security_enable_bot_protection', true)) {
             $this->init();
@@ -50,11 +53,13 @@ class BotBlackhole {
         // Add to robots.txt
         add_filter('robots_txt', array($this, 'add_robots_disallow'), 11, 2);
         
+        // AJAX handlers - Add these for dashboard functionality
+        add_action('wp_ajax_bot_blocker_stats', array($this, 'get_bot_stats'));
+        add_action('wp_ajax_bot_blocker_unblock', array($this, 'unblock_bot'));
+        
         // Schedule cleanup
         add_action('admin_init', array($this, 'schedule_cleanup'));
-        
-        // Ensure table exists
-        $this->ensure_table_exists();
+        add_action('bot_blackhole_cleanup', array($this, 'cleanup_logs'));
     }
     
     private function ensure_table_exists() {
@@ -667,28 +672,78 @@ wordfence';
         );
     }
     
+    // AJAX handler for getting bot stats
+    public function get_bot_stats() {
+        check_ajax_referer('security_bot_stats', 'nonce');
+        
+        if (!current_user_can('manage_options')) {
+            wp_die('Unauthorized');
+        }
+        
+        global $wpdb;
+        
+        $stats = array(
+            'total_blocked' => $wpdb->get_var("SELECT COUNT(*) FROM {$this->table_name} WHERE is_blocked = 1"),
+            'today_blocked' => $wpdb->get_var("SELECT COUNT(*) FROM {$this->table_name} WHERE is_blocked = 1 AND DATE(last_seen) = CURDATE()"),
+            'week_blocked' => $wpdb->get_var("SELECT COUNT(*) FROM {$this->table_name} WHERE is_blocked = 1 AND last_seen >= DATE_SUB(NOW(), INTERVAL 7 DAY)"),
+            'top_blocked_ips' => $wpdb->get_results("SELECT ip_address, SUM(hits) as hits FROM {$this->table_name} WHERE is_blocked = 1 GROUP BY ip_address ORDER BY hits DESC LIMIT 10", ARRAY_A)
+        );
+        
+        wp_send_json_success($stats);
+    }
+    
+    // AJAX handler for unblocking bots
+    public function unblock_bot() {
+        check_ajax_referer('security_bot_unblock', 'nonce');
+        
+        if (!current_user_can('manage_options')) {
+            wp_die('Unauthorized');
+        }
+        
+        $ip = sanitize_text_field($_POST['ip']);
+        
+        global $wpdb;
+        $result = $wpdb->update(
+            $this->table_name,
+            array('is_blocked' => 0),
+            array('ip_address' => $ip),
+            array('%d'),
+            array('%s')
+        );
+        
+        // Also remove from transient cache
+        $blocked_transient = 'bot_blocked_' . md5($ip);
+        delete_transient($blocked_transient);
+        
+        if ($result !== false) {
+            wp_send_json_success('IP unblocked successfully');
+        } else {
+            wp_send_json_error('Failed to unblock IP');
+        }
+    }
+    
     public function get_blocked_bots_stats() {
         global $wpdb;
         
         $stats = array();
         
         // Total blocked bots
-        $stats['total'] = $wpdb->get_var("SELECT COUNT(*) FROM {$this->table_name} WHERE status = 1");
+        $stats['total'] = $wpdb->get_var("SELECT COUNT(*) FROM {$this->table_name} WHERE is_blocked = 1");
         
         // Blocked today
         $stats['today'] = $wpdb->get_var(
-            "SELECT COUNT(*) FROM {$this->table_name} WHERE status = 1 AND DATE(timestamp) = CURDATE()"
+            "SELECT COUNT(*) FROM {$this->table_name} WHERE is_blocked = 1 AND DATE(timestamp) = CURDATE()"
         );
         
         // Blocked this week
         $stats['week'] = $wpdb->get_var(
-            "SELECT COUNT(*) FROM {$this->table_name} WHERE status = 1 AND timestamp >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
+            "SELECT COUNT(*) FROM {$this->table_name} WHERE is_blocked = 1 AND timestamp >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
         );
         
         // Top blocked IPs
         $stats['top_ips'] = $wpdb->get_results(
             "SELECT ip_address, SUM(hits) as count FROM {$this->table_name} 
-             WHERE status = 1 GROUP BY ip_address ORDER BY count DESC LIMIT 10",
+             WHERE is_blocked = 1 GROUP BY ip_address ORDER BY count DESC LIMIT 10",
             ARRAY_A
         );
         
