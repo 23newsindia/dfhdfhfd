@@ -2,7 +2,7 @@
 /*
 Plugin Name: Enhanced Security Plugin
 Description: Comprehensive security plugin with URL exclusion, blocking, SEO features, anti-spam protection, and bot protection
-Version: 2.4
+Version: 2.5
 Author: Your Name
 */
 
@@ -44,6 +44,9 @@ class CustomSecurityPlugin {
         // Add activation hook for database setup
         register_activation_hook(__FILE__, array($this, 'activate_plugin'));
         
+        // Add deactivation hook
+        register_deactivation_hook(__FILE__, array($this, 'deactivate_plugin'));
+        
         // Add cleanup hooks
         add_action('waf_cleanup_logs', array($this, 'cleanup_waf_logs'));
         add_action('bot_blackhole_cleanup', array($this, 'cleanup_bot_logs'));
@@ -51,6 +54,9 @@ class CustomSecurityPlugin {
         
         // Add admin notice for debugging
         add_action('admin_notices', array($this, 'debug_notice'));
+        
+        // Add database update check
+        add_action('admin_init', array($this, 'check_database_updates'));
     }
 
     public function debug_notice() {
@@ -60,8 +66,47 @@ class CustomSecurityPlugin {
             $table_exists = $wpdb->get_var("SHOW TABLES LIKE '$table_name'") === $table_name;
             
             if (!$table_exists) {
-                echo '<div class="notice notice-warning"><p>Bot protection table does not exist. Attempting to create...</p></div>';
-                $this->bot_blackhole = new BotBlackhole();
+                echo '<div class="notice notice-warning"><p>Bot protection table does not exist. Creating table...</p></div>';
+                $this->force_create_tables();
+            } else {
+                // Check if hits column exists
+                $columns = $wpdb->get_results("SHOW COLUMNS FROM $table_name");
+                $has_hits = false;
+                foreach ($columns as $column) {
+                    if ($column->Field === 'hits') {
+                        $has_hits = true;
+                        break;
+                    }
+                }
+                
+                if (!$has_hits) {
+                    echo '<div class="notice notice-warning"><p>Bot protection table is missing required columns. Updating table structure...</p></div>';
+                    $this->force_create_tables();
+                }
+            }
+        }
+    }
+
+    public function check_database_updates() {
+        $db_version = get_option('security_plugin_db_version', '1.0');
+        $current_version = '2.5';
+        
+        if (version_compare($db_version, $current_version, '<')) {
+            $this->force_create_tables();
+            update_option('security_plugin_db_version', $current_version);
+        }
+    }
+
+    private function force_create_tables() {
+        // Force create/update bot protection table
+        $bot_blackhole = new BotBlackhole();
+        $bot_blackhole->ensure_table_exists();
+        
+        // Force create bot blocker table if enabled
+        if (get_option('security_enable_bot_blocking', true)) {
+            $bot_blocker = new BotBlocker();
+            if (method_exists($bot_blocker, 'create_table')) {
+                $bot_blocker->create_table();
             }
         }
     }
@@ -94,7 +139,8 @@ class CustomSecurityPlugin {
             'security_protect_admin' => false,
             'security_protect_login' => false,
             'security_bot_whitelist_ips' => '',
-            'security_bot_whitelist_agents' => $this->get_default_whitelist_bots()
+            'security_bot_whitelist_agents' => $this->get_default_whitelist_bots(),
+            'security_plugin_db_version' => '2.5'
         );
 
         foreach ($default_options as $option => $value) {
@@ -103,13 +149,19 @@ class CustomSecurityPlugin {
             }
         }
         
-        // Force create bot protection tables
-        $bot_blackhole = new BotBlackhole();
+        // Force create tables
+        $this->force_create_tables();
         
-        if (get_option('security_enable_bot_blocking', true)) {
-            $bot_blocker = new BotBlocker();
-            $bot_blocker->create_table();
-        }
+        // Flush rewrite rules
+        flush_rewrite_rules();
+    }
+
+    public function deactivate_plugin() {
+        // Clear scheduled events
+        wp_clear_scheduled_hook('waf_cleanup_logs');
+        wp_clear_scheduled_hook('bot_blackhole_cleanup');
+        wp_clear_scheduled_hook('bot_blocker_cleanup');
+        wp_clear_scheduled_hook('bot_protection_cleanup');
         
         // Flush rewrite rules
         flush_rewrite_rules();

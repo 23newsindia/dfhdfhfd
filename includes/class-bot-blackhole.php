@@ -23,7 +23,7 @@ class BotBlackhole {
             self::$is_admin = is_admin();
         }
         
-        // Always ensure table exists
+        // Always ensure table exists and is up to date
         $this->ensure_table_exists();
         
         // Only initialize if bot protection is enabled
@@ -62,7 +62,7 @@ class BotBlackhole {
         add_action('bot_blackhole_cleanup', array($this, 'cleanup_logs'));
     }
     
-    private function ensure_table_exists() {
+    public function ensure_table_exists() {
         global $wpdb;
         $charset_collate = $wpdb->get_charset_collate();
 
@@ -98,8 +98,25 @@ class BotBlackhole {
     private function update_table_structure() {
         global $wpdb;
         
+        // Check if table exists first
+        $table_exists = $wpdb->get_var("SHOW TABLES LIKE '{$this->table_name}'") === $this->table_name;
+        
+        if (!$table_exists) {
+            // Table doesn't exist, create it
+            $this->ensure_table_exists();
+            return;
+        }
+        
+        // Get current table structure
+        $columns = $wpdb->get_results("SHOW COLUMNS FROM {$this->table_name}");
+        $existing_columns = array();
+        foreach ($columns as $column) {
+            $existing_columns[] = $column->Field;
+        }
+        
         // Add missing columns if they don't exist
         $columns_to_add = array(
+            'hits' => 'ADD COLUMN hits int(11) DEFAULT 1',
             'first_seen' => 'ADD COLUMN first_seen datetime DEFAULT NULL',
             'last_seen' => 'ADD COLUMN last_seen datetime DEFAULT NULL', 
             'is_blocked' => 'ADD COLUMN is_blocked tinyint(1) DEFAULT 1',
@@ -107,13 +124,11 @@ class BotBlackhole {
         );
         
         foreach ($columns_to_add as $column => $sql) {
-            $column_exists = $wpdb->get_results($wpdb->prepare(
-                "SHOW COLUMNS FROM {$this->table_name} LIKE %s",
-                $column
-            ));
-            
-            if (empty($column_exists)) {
-                $wpdb->query("ALTER TABLE {$this->table_name} {$sql}");
+            if (!in_array($column, $existing_columns)) {
+                $result = $wpdb->query("ALTER TABLE {$this->table_name} {$sql}");
+                if ($result === false) {
+                    error_log("Failed to add column {$column} to {$this->table_name}: " . $wpdb->last_error);
+                }
             }
         }
         
@@ -121,6 +136,8 @@ class BotBlackhole {
         $wpdb->query("UPDATE {$this->table_name} SET first_seen = timestamp WHERE first_seen IS NULL");
         $wpdb->query("UPDATE {$this->table_name} SET last_seen = timestamp WHERE last_seen IS NULL");
         $wpdb->query("UPDATE {$this->table_name} SET blocked_reason = block_reason WHERE blocked_reason IS NULL");
+        $wpdb->query("UPDATE {$this->table_name} SET hits = 1 WHERE hits IS NULL OR hits = 0");
+        $wpdb->query("UPDATE {$this->table_name} SET is_blocked = 1 WHERE is_blocked IS NULL");
     }
     
     public function add_blackhole_trap() {
@@ -441,9 +458,10 @@ class BotBlackhole {
                     'block_reason' => $reason,
                     'blocked_reason' => $reason,
                     'status' => 0, // 0 = suspicious, 1 = blocked
-                    'is_blocked' => 0
+                    'is_blocked' => 0,
+                    'hits' => 1
                 ),
-                array('%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%d')
+                array('%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%d', '%d')
             );
         } catch (Exception $e) {
             error_log('Bot Blackhole Log Error: ' . $e->getMessage());
@@ -674,51 +692,105 @@ wordfence';
     
     // AJAX handler for getting bot stats
     public function get_bot_stats() {
-        check_ajax_referer('security_bot_stats', 'nonce');
-        
-        if (!current_user_can('manage_options')) {
-            wp_die('Unauthorized');
+        // Verify nonce
+        if (!check_ajax_referer('security_bot_stats', 'nonce', false)) {
+            wp_send_json_error('Invalid nonce');
+            return;
         }
         
-        global $wpdb;
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized');
+            return;
+        }
         
-        $stats = array(
-            'total_blocked' => $wpdb->get_var("SELECT COUNT(*) FROM {$this->table_name} WHERE is_blocked = 1"),
-            'today_blocked' => $wpdb->get_var("SELECT COUNT(*) FROM {$this->table_name} WHERE is_blocked = 1 AND DATE(last_seen) = CURDATE()"),
-            'week_blocked' => $wpdb->get_var("SELECT COUNT(*) FROM {$this->table_name} WHERE is_blocked = 1 AND last_seen >= DATE_SUB(NOW(), INTERVAL 7 DAY)"),
-            'top_blocked_ips' => $wpdb->get_results("SELECT ip_address, SUM(hits) as hits FROM {$this->table_name} WHERE is_blocked = 1 GROUP BY ip_address ORDER BY hits DESC LIMIT 10", ARRAY_A)
-        );
-        
-        wp_send_json_success($stats);
+        try {
+            global $wpdb;
+            
+            // Ensure table exists and is up to date
+            $this->ensure_table_exists();
+            
+            // Check if table exists
+            $table_exists = $wpdb->get_var("SHOW TABLES LIKE '{$this->table_name}'") === $this->table_name;
+            
+            if (!$table_exists) {
+                wp_send_json_success(array(
+                    'total_blocked' => 0,
+                    'today_blocked' => 0,
+                    'week_blocked' => 0,
+                    'top_blocked_ips' => array()
+                ));
+                return;
+            }
+            
+            $stats = array(
+                'total_blocked' => (int)$wpdb->get_var("SELECT COUNT(*) FROM {$this->table_name} WHERE is_blocked = 1"),
+                'today_blocked' => (int)$wpdb->get_var("SELECT COUNT(*) FROM {$this->table_name} WHERE is_blocked = 1 AND DATE(last_seen) = CURDATE()"),
+                'week_blocked' => (int)$wpdb->get_var("SELECT COUNT(*) FROM {$this->table_name} WHERE is_blocked = 1 AND last_seen >= DATE_SUB(NOW(), INTERVAL 7 DAY)"),
+                'top_blocked_ips' => $wpdb->get_results("SELECT ip_address, SUM(hits) as hits FROM {$this->table_name} WHERE is_blocked = 1 GROUP BY ip_address ORDER BY hits DESC LIMIT 10", ARRAY_A)
+            );
+            
+            // Ensure top_blocked_ips is an array
+            if (!$stats['top_blocked_ips']) {
+                $stats['top_blocked_ips'] = array();
+            }
+            
+            wp_send_json_success($stats);
+            
+        } catch (Exception $e) {
+            error_log('Bot Blackhole Stats Error: ' . $e->getMessage());
+            wp_send_json_error('Database error: ' . $e->getMessage());
+        }
     }
     
     // AJAX handler for unblocking bots
     public function unblock_bot() {
-        check_ajax_referer('security_bot_unblock', 'nonce');
+        // Verify nonce
+        if (!check_ajax_referer('security_bot_unblock', 'nonce', false)) {
+            wp_send_json_error('Invalid nonce');
+            return;
+        }
         
         if (!current_user_can('manage_options')) {
-            wp_die('Unauthorized');
+            wp_send_json_error('Unauthorized');
+            return;
+        }
+        
+        if (!isset($_POST['ip']) || empty($_POST['ip'])) {
+            wp_send_json_error('IP address is required');
+            return;
         }
         
         $ip = sanitize_text_field($_POST['ip']);
         
-        global $wpdb;
-        $result = $wpdb->update(
-            $this->table_name,
-            array('is_blocked' => 0),
-            array('ip_address' => $ip),
-            array('%d'),
-            array('%s')
-        );
+        // Validate IP format
+        if (!filter_var($ip, FILTER_VALIDATE_IP)) {
+            wp_send_json_error('Invalid IP address format');
+            return;
+        }
         
-        // Also remove from transient cache
-        $blocked_transient = 'bot_blocked_' . md5($ip);
-        delete_transient($blocked_transient);
-        
-        if ($result !== false) {
-            wp_send_json_success('IP unblocked successfully');
-        } else {
-            wp_send_json_error('Failed to unblock IP');
+        try {
+            global $wpdb;
+            $result = $wpdb->update(
+                $this->table_name,
+                array('is_blocked' => 0),
+                array('ip_address' => $ip),
+                array('%d'),
+                array('%s')
+            );
+            
+            // Also remove from transient cache
+            $blocked_transient = 'bot_blocked_' . md5($ip);
+            delete_transient($blocked_transient);
+            
+            if ($result !== false) {
+                wp_send_json_success('IP unblocked successfully');
+            } else {
+                wp_send_json_error('Failed to unblock IP - IP may not exist in database');
+            }
+            
+        } catch (Exception $e) {
+            error_log('Bot Blackhole Unblock Error: ' . $e->getMessage());
+            wp_send_json_error('Database error: ' . $e->getMessage());
         }
     }
     
